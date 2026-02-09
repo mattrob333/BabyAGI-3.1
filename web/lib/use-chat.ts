@@ -28,9 +28,11 @@ export function useChat(initialThreadId: string = "web") {
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [pendingToolEvents, setPendingToolEvents] = useState<ToolEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
   const [threads, setThreads] = useState<ThreadInfo[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const pendingToolsRef = useRef<ToolEvent[]>([]);
+  const streamingTextRef = useRef("");
 
   const loadThread = useCallback(async (tid?: string) => {
     const target = tid || threadId;
@@ -105,7 +107,9 @@ export function useChat(initialThreadId: string = "web") {
       setMessages((prev) => [...prev, userMessage]);
       setToolEvents([]);
       setPendingToolEvents([]);
+      setStreamingText("");
       pendingToolsRef.current = [];
+      streamingTextRef.current = "";
       setIsLoading(true);
 
       abortRef.current = new AbortController();
@@ -159,6 +163,12 @@ export function useChat(initialThreadId: string = "web") {
                   pendingToolsRef.current = [...pendingToolsRef.current, evt];
                   setPendingToolEvents([...pendingToolsRef.current]);
                   setToolEvents((prev) => [...prev, evt]);
+                } else if (eventType === "text_delta") {
+                  streamingTextRef.current += payload.text;
+                  setStreamingText(streamingTextRef.current);
+                } else if (eventType === "text_clear") {
+                  streamingTextRef.current = "";
+                  setStreamingText("");
                 } else if (eventType === "message_done") {
                   const assistantMessage: MessageWithTools = {
                     role: "assistant",
@@ -166,7 +176,9 @@ export function useChat(initialThreadId: string = "web") {
                     toolEvents: [...pendingToolsRef.current],
                   };
                   pendingToolsRef.current = [];
+                  streamingTextRef.current = "";
                   setPendingToolEvents([]);
+                  setStreamingText("");
                   setMessages((prev) => [...prev, assistantMessage]);
                 } else if (eventType === "error") {
                   const errorMessage: MessageWithTools = {
@@ -175,7 +187,9 @@ export function useChat(initialThreadId: string = "web") {
                     toolEvents: [...pendingToolsRef.current],
                   };
                   pendingToolsRef.current = [];
+                  streamingTextRef.current = "";
                   setPendingToolEvents([]);
+                  setStreamingText("");
                   setMessages((prev) => [...prev, errorMessage]);
                 }
               } catch {
@@ -200,7 +214,9 @@ export function useChat(initialThreadId: string = "web") {
         setIsLoading(false);
         setToolEvents([]);
         setPendingToolEvents([]);
+        setStreamingText("");
         pendingToolsRef.current = [];
+        streamingTextRef.current = "";
         abortRef.current = null;
         loadThreads();
       }
@@ -214,6 +230,7 @@ export function useChat(initialThreadId: string = "web") {
     toolEvents,
     pendingToolEvents,
     isLoading,
+    streamingText,
     threads,
     sendMessage,
     loadThread,

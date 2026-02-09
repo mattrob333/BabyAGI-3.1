@@ -9,9 +9,10 @@ interface MessageListProps {
   messages: MessageWithTools[];
   pendingToolEvents?: ToolEvent[];
   isLoading?: boolean;
+  streamingText?: string;
 }
 
-export function MessageList({ messages, pendingToolEvents = [], isLoading = false }: MessageListProps) {
+export function MessageList({ messages, pendingToolEvents = [], isLoading = false, streamingText = "" }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
@@ -32,12 +33,12 @@ export function MessageList({ messages, pendingToolEvents = [], isLoading = fals
     scrollToBottom("smooth");
   }, [messages.length, scrollToBottom]);
 
-  // Scroll on pending tool events (loading indicators) unless user manually scrolled up
+  // Scroll on pending tool events or streaming text unless user manually scrolled up
   useEffect(() => {
     if (!userScrolledUp.current) {
       scrollToBottom("smooth");
     }
-  }, [pendingToolEvents.length, scrollToBottom]);
+  }, [pendingToolEvents.length, streamingText, scrollToBottom]);
 
   // Also scroll instantly when the message list is first populated (e.g. loading a thread)
   useEffect(() => {
@@ -93,9 +94,15 @@ export function MessageList({ messages, pendingToolEvents = [], isLoading = fals
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium mb-1 text-muted-foreground">BabyAGI</p>
-              {pendingToolEvents.length > 0 ? (
+              {pendingToolEvents.length > 0 && (
                 <InlineToolEvents events={pendingToolEvents} />
-              ) : (
+              )}
+              {streamingText ? (
+                <div className="text-sm whitespace-pre-wrap break-words mt-1">
+                  {streamingText}
+                  <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5 align-middle" />
+                </div>
+              ) : pendingToolEvents.length === 0 ? (
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <span className="inline-flex gap-0.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
@@ -104,7 +111,7 @@ export function MessageList({ messages, pendingToolEvents = [], isLoading = fals
                   </span>
                   <span className="ml-1">Thinking…</span>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         )}

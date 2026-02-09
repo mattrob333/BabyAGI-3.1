@@ -825,7 +825,7 @@ Work autonomously. Use tools as needed. When done, provide a brief summary of wh
         asyncio.run_coroutine_threadsafe(coro, self._main_loop)
         return True
 
-    async def run_async(self, user_input: str, thread_id: str = "main", context: dict = None) -> str:
+    async def run_async(self, user_input: str, thread_id: str = "main", context: dict = None, stream: bool = False) -> str:
         """Process user input and return response. Objectives run in background.
 
         Args:
@@ -836,6 +836,7 @@ Work autonomously. Use tools as needed. When done, provide a brief summary of wh
                 - is_owner: Whether message is from the agent's owner
                 - sender: Sender identifier (email address, phone, etc.)
                 - Additional channel-specific metadata
+            stream: If True, emit text_delta events via EventEmitter for token-by-token streaming
 
         Thread Safety:
             Operations on each thread_id are serialized via per-thread locks.
@@ -918,7 +919,8 @@ Work autonomously. Use tools as needed. When done, provide a brief summary of wh
                         max_tokens=self._agent_max_tokens,
                         system=system_prompt,
                         tools=tool_schemas,
-                        messages=thread
+                        messages=thread,
+                        stream=stream,
                     )
                 except Exception as e:
                     if not self._is_context_overflow(e):
@@ -936,7 +938,8 @@ Work autonomously. Use tools as needed. When done, provide a brief summary of wh
                             max_tokens=self._agent_max_tokens,
                             system=system_prompt,
                             tools=tool_schemas,
-                            messages=thread
+                            messages=thread,
+                            stream=stream,
                         )
                     except Exception as e2:
                         if not self._is_context_overflow(e2):
@@ -952,7 +955,8 @@ Work autonomously. Use tools as needed. When done, provide a brief summary of wh
                                 max_tokens=self._agent_max_tokens,
                                 system=system_prompt,
                                 tools=tool_schemas,
-                                messages=thread
+                                messages=thread,
+                                stream=stream,
                             )
                         except Exception as e3:
                             if not self._is_context_overflow(e3):
@@ -981,6 +985,10 @@ Work autonomously. Use tools as needed. When done, provide a brief summary of wh
 
                 if response.stop_reason == "end_turn":
                     return self._extract_text(response)
+
+                # About to process tools and loop — clear streaming text
+                if stream:
+                    self.emit("text_clear", {})
 
                 # Execute tools (in thread pool to avoid blocking event loop)
                 # CRITICAL: We must ensure a tool_result is appended for every tool_use,

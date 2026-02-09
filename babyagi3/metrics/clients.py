@@ -1187,6 +1187,7 @@ class _AsyncAnthropicStyleMessages(_AnthropicStyleMessages):
         system = kwargs.get("system")
         tools = kwargs.get("tools")
         messages = kwargs.get("messages", [])
+        stream = kwargs.get("stream", False)
 
         start_time = time.time()
 
@@ -1212,7 +1213,10 @@ class _AsyncAnthropicStyleMessages(_AnthropicStyleMessages):
         max_retries = 3
         for attempt in range(max_retries + 1):
             try:
-                response = await self._client._litellm.acompletion(**call_kwargs)
+                if stream and _event_emitter:
+                    response = await self._stream_with_events(call_kwargs)
+                else:
+                    response = await self._client._litellm.acompletion(**call_kwargs)
                 break
             except Exception as e:
                 if attempt < max_retries and _is_transient_error(e):
@@ -1246,6 +1250,84 @@ class _AsyncAnthropicStyleMessages(_AnthropicStyleMessages):
             })
 
         return _AnthropicStyleResponse(response)
+
+    async def _stream_with_events(self, call_kwargs: dict):
+        """Stream LLM response, emitting text_delta events for each token."""
+        from types import SimpleNamespace
+
+        stream_resp = await self._client._litellm.acompletion(**call_kwargs, stream=True)
+
+        full_text = ""
+        tool_calls_by_idx = {}
+        finish_reason = "stop"
+        prompt_tokens = 0
+        completion_tokens = 0
+
+        async for chunk in stream_resp:
+            if not chunk.choices:
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    prompt_tokens = getattr(chunk.usage, 'prompt_tokens', 0) or 0
+                    completion_tokens = getattr(chunk.usage, 'completion_tokens', 0) or 0
+                continue
+
+            choice = chunk.choices[0]
+            delta = choice.delta
+
+            # Emit text deltas
+            content = getattr(delta, 'content', None)
+            if content:
+                full_text += content
+                _event_emitter.emit("text_delta", {"text": content})
+
+            # Accumulate tool calls
+            if getattr(delta, 'tool_calls', None):
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_by_idx:
+                        tool_calls_by_idx[idx] = {"id": "", "name": "", "arguments": ""}
+                    if tc.id:
+                        tool_calls_by_idx[idx]["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            tool_calls_by_idx[idx]["name"] += tc.function.name
+                        if tc.function.arguments:
+                            tool_calls_by_idx[idx]["arguments"] += tc.function.arguments
+
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+
+            if hasattr(chunk, 'usage') and chunk.usage:
+                prompt_tokens = getattr(chunk.usage, 'prompt_tokens', 0) or 0
+                completion_tokens = getattr(chunk.usage, 'completion_tokens', 0) or 0
+
+        # Build tool_calls list matching LiteLLM's structure
+        tc_list = None
+        if tool_calls_by_idx:
+            tc_list = []
+            for idx in sorted(tool_calls_by_idx.keys()):
+                tc = tool_calls_by_idx[idx]
+                tc_list.append(SimpleNamespace(
+                    id=tc["id"],
+                    function=SimpleNamespace(
+                        name=tc["name"],
+                        arguments=tc["arguments"]
+                    )
+                ))
+
+        # Return a synthetic response matching LiteLLM ModelResponse structure
+        return SimpleNamespace(
+            choices=[SimpleNamespace(
+                message=SimpleNamespace(
+                    content=full_text or None,
+                    tool_calls=tc_list,
+                ),
+                finish_reason=finish_reason,
+            )],
+            usage=SimpleNamespace(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            ),
+        )
 
 
 class LiteLLMAnthropicAdapter:

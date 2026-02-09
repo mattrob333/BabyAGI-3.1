@@ -378,10 +378,13 @@ async def stream_message(req: MessageRequest):
     """Stream agent response with real-time tool events via SSE.
 
     Emits SSE events:
-        tool_start  - {"name": str, "input": str}
-        tool_end    - {"name": str, "result": str, "duration_ms": int}
+        thinking     - {"status": "started"}
+        text_delta   - {"text": str}  (token-by-token streaming)
+        text_clear   - {}  (clear streaming text before next LLM call)
+        tool_start   - {"name": str, "input": str}
+        tool_end     - {"name": str, "result": str, "duration_ms": int}
         message_done - {"response": str, "thread_id": str}
-        error       - {"error": str}
+        error        - {"error": str}
     """
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
     loop = asyncio.get_running_loop()
@@ -408,6 +411,11 @@ async def stream_message(req: MessageRequest):
                 "duration_ms": data.get("duration_ms", 0),
             }
             loop.call_soon_threadsafe(_enqueue, ("tool_end", payload))
+        elif event_type == "text_delta":
+            payload = {"text": data.get("text", "")}
+            loop.call_soon_threadsafe(_enqueue, ("text_delta", payload))
+        elif event_type == "text_clear":
+            loop.call_soon_threadsafe(_enqueue, ("text_clear", {}))
         elif event_type in ("objective_start", "objective_end"):
             payload = {"goal": data.get("goal", ""), "status": data.get("status", "")}
             loop.call_soon_threadsafe(_enqueue, (event_type, payload))
@@ -419,7 +427,7 @@ async def stream_message(req: MessageRequest):
         yield f"event: thinking\ndata: {json.dumps({'status': 'started'})}\n\n"
 
         task = asyncio.create_task(
-            agent.run_async(req.content, req.thread_id)
+            agent.run_async(req.content, req.thread_id, stream=True)
         )
         try:
             while not task.done():

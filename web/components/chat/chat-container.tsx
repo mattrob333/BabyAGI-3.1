@@ -40,6 +40,7 @@ export function ChatContainer() {
     messages,
     pendingToolEvents,
     isLoading,
+    streamingText,
     threads,
     sendMessage,
     loadThread,
@@ -164,7 +165,7 @@ export function ChatContainer() {
         </div>
 
         {/* Messages — flex-1 + min-h-0 ensures this scrolls, not the page */}
-        <MessageList messages={messages} pendingToolEvents={pendingToolEvents} isLoading={isLoading} />
+        <MessageList messages={messages} pendingToolEvents={pendingToolEvents} isLoading={isLoading} streamingText={streamingText} />
         <MessageInput
           onSend={sendMessage}
           disabled={isLoading}
