@@ -30,6 +30,10 @@ WORKDIR /app
 COPY babyagi3/pyproject.toml babyagi3/uv.lock* ./babyagi3/
 WORKDIR /app/babyagi3
 RUN uv sync --no-dev --group telegram
+# Install composio into the uv-managed venv separately.
+# The full [integrations] group bundles e2b-code-interpreter which has heavy
+# native deps that fail on slim images and crash the backend.
+RUN uv pip install composio
 
 # Copy backend source
 COPY babyagi3/ ./
