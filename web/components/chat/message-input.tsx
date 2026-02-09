@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { getAuthHeaders } from "@/lib/api";
 
 export interface QuickAction {
   label: string;
@@ -54,6 +55,7 @@ export function MessageInput({
     try {
       const res = await fetch(`/api/files/upload`, {
         method: "POST",
+        headers: getAuthHeaders(),
         body: formData,
       });
       if (res.ok) {
