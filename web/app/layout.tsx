@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BabyAGI",
+  title: "BabyAGI 3",
   description: "AI Agent Dashboard",
 };
 

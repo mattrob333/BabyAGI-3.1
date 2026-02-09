@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,7 +32,6 @@ const EMPTY_FORM: SetupFormData = {
 };
 
 export function SetupForm() {
-  const router = useRouter();
   const [form, setForm] = useState<SetupFormData>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -47,6 +45,7 @@ export function SetupForm() {
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [modelSaving, setModelSaving] = useState(false);
   const [formLoading, setFormLoading] = useState(true);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -107,12 +106,14 @@ export function SetupForm() {
     }
 
     setSubmitting(true);
+    setSaved(false);
     try {
       await apiFetch("/setup/complete", {
         method: "POST",
         body: JSON.stringify(form),
       });
-      router.push("/");
+      setSaved(true);
+      setError("");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -129,7 +130,8 @@ export function SetupForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl mx-auto py-8 px-4 pb-16">
+    <form onSubmit={handleSubmit} className="h-full overflow-y-auto">
+      <div className="space-y-6 max-w-2xl mx-auto py-8 px-4 pb-16">
       <div>
         <h1 className="text-2xl font-bold">Setup BabyAGI</h1>
         <p className="text-muted-foreground mt-1">
@@ -351,9 +353,19 @@ export function SetupForm() {
         </CardContent>
       </Card>
 
+      {saved && (
+        <div className="rounded-md bg-green-500/10 border border-green-500/30 text-green-400 text-sm p-3 flex items-center gap-2">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <path d="M3.5 8l3 3 6-6.5" />
+          </svg>
+          Settings saved successfully.
+        </div>
+      )}
+
       <Button type="submit" className="w-full" disabled={submitting}>
-        {submitting ? "Saving..." : "Complete Setup"}
+        {submitting ? "Saving..." : saved ? "Save Changes" : "Complete Setup"}
       </Button>
+      </div>
     </form>
   );
 }
