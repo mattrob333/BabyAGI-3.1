@@ -384,15 +384,20 @@ async def stream_message(req: MessageRequest):
         error       - {"error": str}
     """
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    loop = asyncio.get_running_loop()
+
+    def _enqueue(item: tuple):
+        """Thread-safe enqueue: works from both event loop and worker threads."""
+        try:
+            queue.put_nowait(item)
+        except asyncio.QueueFull:
+            pass
 
     def _sse_handler(data: dict):
         event_type = data.get("_event", "")
         if event_type == "tool_start":
             payload = {"name": data.get("name", ""), "input": str(data.get("input", ""))[:500]}
-            try:
-                queue.put_nowait(("tool_start", payload))
-            except asyncio.QueueFull:
-                pass
+            loop.call_soon_threadsafe(_enqueue, ("tool_start", payload))
         elif event_type == "tool_end":
             result_str = str(data.get("result", ""))
             if len(result_str) > 1000:
@@ -402,16 +407,10 @@ async def stream_message(req: MessageRequest):
                 "result": result_str,
                 "duration_ms": data.get("duration_ms", 0),
             }
-            try:
-                queue.put_nowait(("tool_end", payload))
-            except asyncio.QueueFull:
-                pass
+            loop.call_soon_threadsafe(_enqueue, ("tool_end", payload))
         elif event_type in ("objective_start", "objective_end"):
             payload = {"goal": data.get("goal", ""), "status": data.get("status", "")}
-            try:
-                queue.put_nowait((event_type, payload))
-            except asyncio.QueueFull:
-                pass
+            loop.call_soon_threadsafe(_enqueue, (event_type, payload))
 
     agent.on("*", _sse_handler)
 

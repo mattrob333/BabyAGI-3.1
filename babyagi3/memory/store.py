@@ -106,10 +106,10 @@ def generate_id() -> str:
 def now_iso() -> str:
     """Get current UTC time as ISO string (naive, no tzinfo suffix).
 
-    Returns naive UTC to stay compatible with the rest of the codebase
-    which uses datetime.now() throughout.  All timestamps are implicitly UTC.
+    Returns naive UTC to stay compatible with the rest of the codebase.
+    All timestamps are implicitly UTC.
     """
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def parse_datetime(s: str | None) -> datetime | None:
@@ -1951,7 +1951,7 @@ class MemoryStore:
     def get_retrieval_stats_by_method(self, days: int = 30) -> dict:
         """Get retrieval statistics by method for learning."""
         cur = self.conn.cursor()
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).isoformat()
 
         cur.execute(
             """
@@ -2051,7 +2051,7 @@ class MemoryStore:
     def get_extraction_stats(self, days: int = 30) -> dict:
         """Get extraction statistics for monitoring."""
         cur = self.conn.cursor()
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).isoformat()
 
         cur.execute(
             """
@@ -3339,11 +3339,11 @@ class MemoryStore:
         deleted = 0
 
         # Calculate cutoff dates
-        cutoff = (datetime.now() - timedelta(days=policy.max_age_days)).isoformat()
+        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=policy.max_age_days)).isoformat()
         important_cutoff = None
         if policy.important_event_types and policy.important_multiplier > 1:
             important_days = int(policy.max_age_days * policy.important_multiplier)
-            important_cutoff = (datetime.now() - timedelta(days=important_days)).isoformat()
+            important_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=important_days)).isoformat()
 
         # Build exclusion conditions
         exclusions = []

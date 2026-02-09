@@ -133,11 +133,17 @@ class Schedule:
 
     def _parse_interval(self, interval: str) -> int:
         """Parse human-friendly interval to seconds: 5m, 2h, 1d, 30s"""
+        if not interval or not interval.strip():
+            raise ValueError("Interval string cannot be empty. Use e.g. '5m', '2h', '1d'.")
+        interval = interval.strip()
         unit_map = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
         unit = interval[-1].lower()
         if unit not in unit_map:
             raise ValueError(f"Unknown interval unit '{unit}' in '{interval}'. Use s, m, h, or d.")
-        value = int(interval[:-1])
+        num_part = interval[:-1]
+        if not num_part.isdigit():
+            raise ValueError(f"Invalid interval number '{num_part}' in '{interval}'. Expected e.g. '5m', '2h'.")
+        value = int(num_part)
         if value <= 0:
             raise ValueError(f"Interval value must be positive, got {value} in '{interval}'")
         return value * unit_map[unit]
