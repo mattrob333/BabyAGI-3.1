@@ -1,0 +1,573 @@
+"""
+BabyAGI - Multi-Channel AI Assistant
+
+Entry point for the agent with support for multiple input/output channels.
+
+Usage:
+    python main.py              # Run with CLI (default)
+    python main.py serve        # Run API server only
+    python main.py serve 8080   # Run on custom port
+    python main.py channels     # Run listeners only (no webhook server)
+    python main.py all          # Run EVERYTHING: CLI + Email + SMS webhooks
+    python main.py all 8080     # Run all on custom port
+    python main.py init         # Re-run interactive setup wizard
+
+Channels:
+    - CLI: Command-line interface (always enabled)
+    - Email: Receive and respond to emails via AgentMail
+    - Voice: Speech input/output (requires additional packages)
+    - SendBlue: SMS/iMessage via SendBlue webhooks (requires 'all' or 'serve' mode)
+
+Configuration:
+    Set options in config.yaml or via environment variables.
+    See config.yaml for all available options.
+
+Verbose Output:
+    Control with BABYAGI_VERBOSE environment variable or config.yaml:
+    - 0/off: No verbose output
+    - 1/light: Key operations (tool names, task starts) [default]
+    - 2/deep: Everything (inputs, outputs, full details)
+
+    Runtime toggle: /verbose [off|light|deep]
+"""
+
+import asyncio
+import logging
+import os
+import signal
+import sys
+
+# Load .env file if present (before any config reads).
+# Supports .env, Replit secrets, or direct environment variables.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed — not required, env vars / Replit secrets still work
+    pass
+
+from utils.console import console
+
+# Configure logging with immediate stderr output
+handler = logging.StreamHandler(sys.stderr)
+handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+logging.root.addHandler(handler)
+
+# Suppress noisy library loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("primp").setLevel(logging.WARNING)
+
+# Suppress uvicorn loggers - these pollute the CLI chat interface
+# with raw HTTP access logs (e.g. "INFO: 172.31.95.130 - POST /webhooks/...")
+# and startup messages. We replace them with styled console.activity() output.
+logging.getLogger("uvicorn").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+
+# Default to WARNING - will be adjusted based on verbose level
+logging.root.setLevel(logging.WARNING)
+handler.setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
+
+def configure_logging_for_verbose(verbose_level: str):
+    """Configure Python logging level based on verbose setting.
+
+    - off/light: Only show WARNING and above (suppress INFO)
+    - deep: Show INFO and above (full logging)
+
+    Note: uvicorn loggers are always kept at WARNING to prevent
+    raw HTTP access logs from polluting the CLI chat interface.
+    """
+    if verbose_level == "deep" or verbose_level == "2":
+        logging.root.setLevel(logging.INFO)
+        handler.setLevel(logging.INFO)
+    else:
+        # off or light - suppress INFO level logs
+        logging.root.setLevel(logging.WARNING)
+        handler.setLevel(logging.WARNING)
+
+    # Always keep uvicorn quiet - its access logs break the CLI flow.
+    # Webhook activity is shown via console.activity() instead.
+    logging.getLogger("uvicorn").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+
+
+def check_llm_provider():
+    """
+    Check if an LLM provider is configured. Exit with helpful message if not.
+
+    This check runs before any async code or agent initialization to provide
+    immediate, clear feedback to the user.
+    """
+    from llm_config import is_llm_configured, get_missing_config_message, get_available_provider
+
+    if not is_llm_configured():
+        # Print the helpful configuration message
+        print(get_missing_config_message())
+        sys.exit(1)
+
+    # Log which provider was detected
+    provider = get_available_provider()
+    provider_names = {
+        "anthropic": "Anthropic (Claude)",
+        "moonshot": "Moonshot AI (Kimi K2.5)",
+        "openai": "OpenAI (GPT)",
+    }
+    console.success(f"LLM Provider: {provider_names.get(provider, provider)}")
+
+
+def _setup_signal_handlers(agent, loop=None):
+    """Set up graceful shutdown on SIGTERM/SIGINT."""
+    async def _shutdown(sig):
+        logger.info("Received %s, shutting down...", sig.name)
+        console.system(f"\nReceived {sig.name}, shutting down gracefully...")
+        await agent.shutdown()
+
+    def _handle_signal(sig, frame):
+        if loop and loop.is_running():
+            loop.create_task(_shutdown(signal.Signals(sig)))
+        else:
+            sys.exit(0)
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    try:
+        signal.signal(signal.SIGTERM, _handle_signal)
+    except (OSError, ValueError):
+        pass  # SIGTERM not available on Windows
+
+
+def main():
+    """Main entry point."""
+    # First, check if LLM provider is configured (deterministic check, no API calls)
+    check_llm_provider()
+
+    # Handle explicit re-initialization: python main.py init
+    if len(sys.argv) > 1 and sys.argv[1] == "init":
+        from config import load_config
+        from initialization import run_initialization
+        config = load_config()
+        run_initialization(config, force=True)
+        # After init, continue into default mode (all channels)
+        asyncio.run(run_all_channels())
+        return
+
+    # Check if first-time initialization is needed.
+    # Passing config lets it detect manual configuration (env vars / config.yaml)
+    # and auto-skip the wizard when owner name + email are already set.
+    from config import load_config
+    from initialization import needs_initialization, run_initialization
+    config = load_config()
+    if needs_initialization(config):
+        run_initialization(config)
+
+    # Restore secrets from keyring into env vars so SDKs (Composio, etc.)
+    # can find keys that were stored during init or via store_secret.
+    from tools.secrets import load_keyring_secrets
+    load_keyring_secrets()
+
+    if len(sys.argv) > 1:
+        command = sys.argv[1]
+
+        if command == "serve":
+            # API server mode
+            import uvicorn
+            from server import app
+            port = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
+            uvicorn.run(app, host=os.environ.get("BABYAGI_HOST", "127.0.0.1"), port=port)
+
+        elif command == "channels":
+            # Multi-channel mode (listeners only, no webhook server)
+            asyncio.run(run_all_channels())
+
+        elif command == "all":
+            # Combined mode: API server + all channel listeners
+            port = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
+            asyncio.run(run_all_with_server(port))
+
+        elif command == "cli":
+            # Explicit CLI mode
+            asyncio.run(run_cli_only())
+
+        else:
+            console.error(f"Unknown command: {command}")
+            console.system("Usage: python main.py [serve|channels|cli|all|init]")
+            sys.exit(1)
+    else:
+        # Default: Run all enabled channels
+        asyncio.run(run_all_channels())
+
+
+async def run_cli_only():
+    """Run CLI listener only (original behavior)."""
+    from agent import Agent
+    from listeners.cli import run_cli_listener
+
+    console.banner("BabyAGI v0.3.0")
+
+    # Load config
+    from config import load_config
+    config = load_config()
+
+    # Configure verbose level from config (env var takes precedence)
+    if not os.environ.get("BABYAGI_VERBOSE"):
+        verbose_config = config.get("verbose", "light")
+        console.set_verbose(verbose_config)
+        configure_logging_for_verbose(verbose_config)
+
+    # Initialize agent (memory status is printed during initialization)
+    agent = Agent(config=config)
+
+    # Set up graceful shutdown handlers
+    loop = asyncio.get_running_loop()
+    _setup_signal_handlers(agent, loop)
+
+    # Schedule post-initialization tasks if this is a fresh setup
+    from initialization import schedule_post_init_tasks
+    schedule_post_init_tasks(agent)
+
+    # Start optional memory background tasks
+    background_tasks = []
+    if agent.memory is not None:
+        memory_config = config.get("memory", {})
+        if memory_config.get("background_extraction", True):
+            from memory.integration import create_extraction_background_task
+            extraction_loop = create_extraction_background_task(
+                agent.memory,
+                interval_seconds=memory_config.get("extraction_interval", 60),
+                agent=agent,
+            )
+            background_tasks.append(asyncio.create_task(extraction_loop()))
+
+    # Start CLI listener first (includes greeting), then start scheduler
+    # Scheduler is started inside the listener after greeting displays
+    try:
+        await run_cli_listener(agent, config.get("channels", {}).get("cli", {}), start_scheduler=True)
+    except KeyboardInterrupt:
+        console.system("\nGoodbye!")
+    finally:
+        # Clean up background tasks
+        for task in background_tasks:
+            task.cancel()
+        await agent.shutdown()
+
+
+async def run_all_channels():
+    """Run all enabled channels concurrently."""
+    from agent import Agent
+    from config import load_config, is_channel_enabled, get_channel_config
+
+    console.banner("BabyAGI v0.3.0 - Multi-Channel Mode")
+
+    # Load config
+    config = load_config()
+
+    # Configure verbose level from config (env var takes precedence)
+    if not os.environ.get("BABYAGI_VERBOSE"):
+        verbose_config = config.get("verbose", "light")
+        console.set_verbose(verbose_config)
+        configure_logging_for_verbose(verbose_config)
+
+    # Initialize agent with config (memory status is printed during initialization)
+    agent = Agent(config=config)
+
+    # Set up graceful shutdown handlers
+    loop = asyncio.get_running_loop()
+    _setup_signal_handlers(agent, loop)
+
+    # Schedule post-initialization tasks if this is a fresh setup
+    from initialization import schedule_post_init_tasks
+    schedule_post_init_tasks(agent)
+
+    # Register senders for enabled channels
+    _register_senders(agent, config)
+
+    # Build list of tasks
+    tasks = []
+
+    # Always run scheduler
+    tasks.append(agent.run_scheduler())
+
+    # Memory background extraction task (if SQLite memory is active)
+    if agent.memory is not None:
+        memory_config = config.get("memory", {})
+        if memory_config.get("background_extraction", True):
+            from memory.integration import create_extraction_background_task
+            extraction_loop = create_extraction_background_task(
+                agent.memory,
+                interval_seconds=memory_config.get("extraction_interval", 60),
+                agent=agent,
+            )
+            tasks.append(extraction_loop())
+
+    # CLI (always enabled, but check config)
+    if is_channel_enabled(config, "cli"):
+        from listeners.cli import run_cli_listener
+        cli_config = get_channel_config(config, "cli")
+        tasks.append(run_cli_listener(agent, cli_config))
+        logger.info("CLI listener enabled")
+
+    # Email
+    if is_channel_enabled(config, "email"):
+        # Check if AgentMail is configured
+        if os.environ.get("AGENTMAIL_API_KEY"):
+            from listeners.email import run_email_listener
+            email_config = get_channel_config(config, "email")
+            email_config["owner_email"] = config.get("owner", {}).get("email")
+            tasks.append(run_email_listener(agent, email_config))
+            logger.info("Email listener enabled")
+        else:
+            logger.warning("Email enabled but AGENTMAIL_API_KEY not set")
+
+    # Voice
+    if is_channel_enabled(config, "voice"):
+        from listeners.voice import run_voice_listener
+        voice_config = get_channel_config(config, "voice")
+        tasks.append(run_voice_listener(agent, voice_config))
+        logger.info("Voice listener enabled")
+
+    # SendBlue (SMS/iMessage)
+    if is_channel_enabled(config, "sendblue"):
+        # Check if SendBlue is configured
+        if os.environ.get("SENDBLUE_API_KEY") and os.environ.get("SENDBLUE_API_SECRET"):
+            from listeners.sendblue import run_sendblue_listener
+            sendblue_config = get_channel_config(config, "sendblue")
+            sendblue_config["owner_phone"] = config.get("owner", {}).get("phone")
+            tasks.append(run_sendblue_listener(agent, sendblue_config))
+            logger.info("SendBlue listener enabled")
+        else:
+            logger.warning("SendBlue enabled but SENDBLUE_API_KEY or SENDBLUE_API_SECRET not set")
+
+    # Telegram
+    if is_channel_enabled(config, "telegram"):
+        if os.environ.get("TELEGRAM_BOT_TOKEN"):
+            from listeners.telegram import run_telegram_listener
+            telegram_config = get_channel_config(config, "telegram")
+            tasks.append(run_telegram_listener(agent, telegram_config))
+            logger.info("Telegram listener enabled")
+        else:
+            logger.warning("Telegram enabled but TELEGRAM_BOT_TOKEN not set")
+
+    # Discord
+    if is_channel_enabled(config, "discord"):
+        if os.environ.get("DISCORD_BOT_TOKEN"):
+            from listeners.discord import run_discord_listener
+            discord_config = get_channel_config(config, "discord")
+            tasks.append(run_discord_listener(agent, discord_config))
+            logger.info("Discord listener enabled")
+        else:
+            logger.warning("Discord enabled but DISCORD_BOT_TOKEN not set")
+
+    # Log active channels
+    active_channels = [name for name in ["cli", "email", "voice", "sendblue", "telegram", "discord"]
+                      if is_channel_enabled(config, name)]
+    console.system(f"\nActive channels: {', '.join(active_channels)}")
+    console.system("Press Ctrl+C to stop\n")
+
+    # Run all tasks
+    try:
+        await asyncio.gather(*tasks)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        await agent.shutdown()
+
+
+async def run_all_with_server(port: int = 5000):
+    """Run API server + all channel listeners together.
+
+    This mode enables:
+    - CLI input
+    - Email listener
+    - SendBlue SMS webhooks (via /webhooks/sendblue)
+    - All other configured channels
+
+    The server and listeners share the same agent instance.
+    """
+    import uvicorn
+    from config import load_config, is_channel_enabled, get_channel_config
+
+    # Import server module - this creates the shared agent
+    from server import app, agent, _register_server_senders
+
+    console.banner("BabyAGI v0.3.0 - Full Mode (Server + Channels)")
+
+    # Load config
+    config = load_config()
+
+    # Configure verbose level from config (env var takes precedence)
+    if not os.environ.get("BABYAGI_VERBOSE"):
+        verbose_config = config.get("verbose", "light")
+        console.set_verbose(verbose_config)
+        configure_logging_for_verbose(verbose_config)
+
+    # Set up graceful shutdown handlers
+    loop = asyncio.get_running_loop()
+    _setup_signal_handlers(agent, loop)
+
+    # Schedule post-initialization tasks if this is a fresh setup
+    from initialization import schedule_post_init_tasks
+    schedule_post_init_tasks(agent)
+
+    # Register all senders on the server's agent
+    _register_senders(agent, config)
+
+    # Build list of listener tasks
+    tasks = []
+
+    # Scheduler
+    tasks.append(agent.run_scheduler())
+
+    # Memory background extraction (if SQLite memory is active)
+    if agent.memory is not None:
+        memory_config = config.get("memory", {})
+        if memory_config.get("background_extraction", True):
+            from memory.integration import create_extraction_background_task
+            extraction_loop = create_extraction_background_task(
+                agent.memory,
+                interval_seconds=memory_config.get("extraction_interval", 60),
+                agent=agent,
+            )
+            tasks.append(extraction_loop())
+
+    # CLI listener
+    if is_channel_enabled(config, "cli"):
+        from listeners.cli import run_cli_listener
+        cli_config = get_channel_config(config, "cli")
+        tasks.append(run_cli_listener(agent, cli_config))
+        logger.info("CLI listener enabled")
+
+    # Email listener
+    if is_channel_enabled(config, "email"):
+        if os.environ.get("AGENTMAIL_API_KEY"):
+            from listeners.email import run_email_listener
+            email_config = get_channel_config(config, "email")
+            email_config["owner_email"] = config.get("owner", {}).get("email")
+            tasks.append(run_email_listener(agent, email_config))
+            logger.info("Email listener enabled")
+        else:
+            logger.warning("Email enabled but AGENTMAIL_API_KEY not set")
+
+    # Voice listener
+    if is_channel_enabled(config, "voice"):
+        from listeners.voice import run_voice_listener
+        voice_config = get_channel_config(config, "voice")
+        tasks.append(run_voice_listener(agent, voice_config))
+        logger.info("Voice listener enabled")
+
+    # Note: SendBlue inbound is handled via webhook at /webhooks/sendblue
+    # The polling listener is NOT needed in this mode
+    if is_channel_enabled(config, "sendblue"):
+        if os.environ.get("SENDBLUE_API_KEY") and os.environ.get("SENDBLUE_API_SECRET"):
+            logger.info("SendBlue SMS enabled via webhook at /webhooks/sendblue")
+        else:
+            logger.warning("SendBlue enabled but API keys not set")
+
+    # Telegram listener
+    if is_channel_enabled(config, "telegram"):
+        if os.environ.get("TELEGRAM_BOT_TOKEN"):
+            from listeners.telegram import run_telegram_listener
+            telegram_config = get_channel_config(config, "telegram")
+            tasks.append(run_telegram_listener(agent, telegram_config))
+            logger.info("Telegram listener enabled")
+        else:
+            logger.warning("Telegram enabled but TELEGRAM_BOT_TOKEN not set")
+
+    # Discord listener
+    if is_channel_enabled(config, "discord"):
+        if os.environ.get("DISCORD_BOT_TOKEN"):
+            from listeners.discord import run_discord_listener
+            discord_config = get_channel_config(config, "discord")
+            tasks.append(run_discord_listener(agent, discord_config))
+            logger.info("Discord listener enabled")
+        else:
+            logger.warning("Discord enabled but DISCORD_BOT_TOKEN not set")
+
+    # Create uvicorn server config (warning level to suppress access logs)
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=os.environ.get("BABYAGI_HOST", "127.0.0.1"),
+        port=port,
+        log_level="warning"
+    )
+    server = uvicorn.Server(uvicorn_config)
+
+    # Add server to tasks
+    tasks.append(server.serve())
+
+    # Log active channels
+    active_channels = []
+    if is_channel_enabled(config, "cli"):
+        active_channels.append("cli")
+    if is_channel_enabled(config, "email") and os.environ.get("AGENTMAIL_API_KEY"):
+        active_channels.append("email")
+    if is_channel_enabled(config, "voice"):
+        active_channels.append("voice")
+    if is_channel_enabled(config, "sendblue") and os.environ.get("SENDBLUE_API_KEY"):
+        active_channels.append("sendblue (webhook)")
+    if is_channel_enabled(config, "telegram") and os.environ.get("TELEGRAM_BOT_TOKEN"):
+        active_channels.append("telegram")
+    if is_channel_enabled(config, "discord") and os.environ.get("DISCORD_BOT_TOKEN"):
+        active_channels.append("discord")
+
+    console.system(f"\nActive channels: {', '.join(active_channels)}")
+    console.system(f"API server: http://0.0.0.0:{port}")
+    console.system(f"SendBlue webhook: http://0.0.0.0:{port}/webhooks/sendblue")
+    console.system("Press Ctrl+C to stop\n")
+
+    # Run everything
+    try:
+        await asyncio.gather(*tasks)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        await agent.shutdown()
+
+
+def _register_senders(agent, config):
+    """Register senders for enabled channels."""
+    from config import is_channel_enabled, get_channel_config
+
+    # CLI sender (always available)
+    from senders.cli import CLISender
+    agent.register_sender("cli", CLISender())
+
+    # Email sender
+    if is_channel_enabled(config, "email"):
+        if os.environ.get("AGENTMAIL_API_KEY"):
+            from senders.email import EmailSender
+            email_config = get_channel_config(config, "email")
+            agent.register_sender("email", EmailSender(email_config))
+            logger.info("Email sender registered")
+
+    # SendBlue sender (SMS/iMessage)
+    if is_channel_enabled(config, "sendblue"):
+        if os.environ.get("SENDBLUE_API_KEY") and os.environ.get("SENDBLUE_API_SECRET"):
+            from senders.sendblue import SendBlueSender
+            sendblue_config = get_channel_config(config, "sendblue")
+            agent.register_sender("sendblue", SendBlueSender(sendblue_config))
+            logger.info("SendBlue sender registered")
+
+    # Telegram sender
+    if is_channel_enabled(config, "telegram"):
+        if os.environ.get("TELEGRAM_BOT_TOKEN"):
+            from senders.telegram import TelegramSender
+            telegram_config = get_channel_config(config, "telegram")
+            agent.register_sender("telegram", TelegramSender(telegram_config))
+            logger.info("Telegram sender registered")
+
+    # Discord sender
+    if is_channel_enabled(config, "discord"):
+        if os.environ.get("DISCORD_BOT_TOKEN"):
+            from senders.discord import DiscordSender
+            discord_config = get_channel_config(config, "discord")
+            discord_sender = DiscordSender(discord_config)
+            discord_sender.set_agent(agent)
+            agent.register_sender("discord", discord_sender)
+            logger.info("Discord sender registered")
+
+
+if __name__ == "__main__":
+    main()

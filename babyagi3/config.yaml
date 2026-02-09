@@ -1,0 +1,182 @@
+# BabyAGI Configuration
+# Environment variables can be used with ${VAR_NAME} or ${VAR_NAME:default}
+
+# Owner configuration
+owner:
+  id: "${OWNER_ID:owner}"
+  name: "${OWNER_NAME:}"
+  email: "${OWNER_EMAIL:}"
+  bio: "${OWNER_BIO:}"          # Brief description of who the owner is (role, profession, interests)
+  goal: "${OWNER_GOAL:}"        # How the owner wants this agent to help them
+  phone: "${OWNER_PHONE:}"
+  timezone: "${OWNER_TIMEZONE:}"
+  contacts:
+    email: "${OWNER_EMAIL:}"
+    phone: "${OWNER_PHONE:}"
+    # whatsapp: "${OWNER_PHONE:}"
+
+# Channel configuration
+channels:
+  # CLI is always enabled
+  cli:
+    enabled: true
+
+  # Email via AgentMail
+  email:
+    enabled: true
+    poll_interval: 60  # seconds between inbox checks
+    api_key: "${AGENTMAIL_API_KEY:}"
+    inbox_id: "${AGENTMAIL_INBOX_ID:}"
+
+  # Voice (requires additional packages: pip install babyagi[voice])
+  voice:
+    enabled: false
+    wake_word: "hey assistant"
+    stt_provider: "whisper"  # or "openai"
+    tts_provider: "pyttsx3"  # or "openai"
+    whisper_model: "base"  # tiny, base, small, medium, large
+    sample_rate: 16000
+    max_duration: 10  # max recording seconds
+    silence_threshold: 2.0  # seconds of silence to stop recording
+    energy_threshold: 0.01  # RMS energy level for silence detection
+
+  # SendBlue - SMS/iMessage via SendBlue API
+  # Automatically enabled when SENDBLUE_API_KEY and SENDBLUE_API_SECRET are set
+  sendblue:
+    enabled: true
+    poll_interval: 30  # seconds between message checks
+    api_key: "${SENDBLUE_API_KEY:}"
+    api_secret: "${SENDBLUE_API_SECRET:}"
+    from_number: "${SENDBLUE_PHONE_NUMBER:}"  # Your SendBlue phone number
+
+  # Meeting Bot via Recall.ai
+  # Join meetings, transcribe, summarize, and store to memory
+  meeting:
+    enabled: true
+    api_key: "${RECALL_API_KEY:}"
+    region: "${RECALL_REGION:us-west-2}"
+    bot_name: "${RECALL_BOT_NAME:BabyAGI Notetaker}"
+    webhook_url: "${RECALL_WEBHOOK_URL:}"  # Your server's public URL for webhooks
+
+    # Backchannel settings - send live insights during meetings
+    backchannel:
+      enabled: true
+      interval_seconds: 300  # Send insights every 5 minutes during meeting
+
+    # Meeting filtering - which meetings to auto-join
+    filters:
+      min_duration_minutes: 15  # Skip meetings shorter than 15 min
+      max_duration_minutes: 480  # Skip meetings longer than 8 hours
+      require_external_attendees: false  # Only join if external people present
+      require_invite_keyword: null  # e.g., "record" - only join if keyword in title
+      exclude_keywords: []  # Skip if these words in title, e.g., ["1:1", "standup"]
+      only_if_invited_email: true  # Only join if bot email is explicitly invited
+
+    # Calendar integration (requires OAuth setup)
+    calendar:
+      enabled: false
+      platform: "google"  # or "microsoft"
+      oauth_client_id: "${GOOGLE_OAUTH_CLIENT_ID:}"
+      oauth_client_secret: "${GOOGLE_OAUTH_CLIENT_SECRET:}"
+      auto_join_all: false  # If true, join all meetings on calendar
+
+  # SMS via Twilio (example - implement TwilioSender)
+  # sms:
+  #   enabled: false
+  #   provider: "twilio"
+  #   account_sid: "${TWILIO_ACCOUNT_SID:}"
+  #   auth_token: "${TWILIO_AUTH_TOKEN:}"
+  #   from_number: "${TWILIO_PHONE_NUMBER:}"
+
+  # WhatsApp (example - implement WhatsAppSender)
+  # whatsapp:
+  #   enabled: false
+  #   provider: "twilio"  # or "meta"
+  #   # ... provider-specific config
+
+  # Telegram Bot
+  telegram:
+    enabled: ${TELEGRAM_ENABLED:false}
+    bot_token: "${TELEGRAM_BOT_TOKEN:}"
+    owner_user_id: "${TELEGRAM_OWNER_USER_ID:}"
+    allowed_user_ids: []
+
+  # Discord Bot
+  discord:
+    enabled: ${DISCORD_ENABLED:false}
+    bot_token: "${DISCORD_BOT_TOKEN:}"
+    owner_user_id: "${DISCORD_OWNER_USER_ID:}"
+    allowed_channel_ids: []
+    allowed_user_ids: []
+
+# LLM Configuration - Multi-provider support via LiteLLM
+# Works with OPENAI_API_KEY, ANTHROPIC_API_KEY, or MOONSHOT_API_KEY set
+# Models are automatically selected based on available provider if not specified
+# To use Moonshot/Kimi K2.5, set MOONSHOT_API_KEY and optionally AGENT_MODEL=moonshot/kimi-k2.5
+llm:
+  # Model for code generation and analysis (most powerful)
+  coding_model:
+    model: "${CODING_MODEL:claude-sonnet-4-20250514}"
+    max_tokens: 8096
+    temperature: 0.0
+
+  # Model for research and information synthesis
+  research_model:
+    model: "${RESEARCH_MODEL:claude-sonnet-4-20250514}"
+    max_tokens: 4096
+    temperature: 0.0
+
+  # Model for main agent operations
+  agent_model:
+    model: "${AGENT_MODEL:claude-sonnet-4-20250514}"
+    max_tokens: 8096
+    temperature: 0.0
+
+  # Model for memory operations (extraction, summaries, learning)
+  # Uses Haiku 4.5 by default: same price as 3.5, 2x faster, higher quality.
+  # Switch to Sonnet if extraction quality is insufficient for your use case.
+  memory_model:
+    model: "${MEMORY_MODEL:claude-haiku-4-5-20251001}"
+    max_tokens: 4096
+    temperature: 0.0
+
+  # Model for quick/cheap operations (classification, routing)
+  fast_model:
+    model: "${FAST_MODEL:claude-haiku-4-5-20251001}"
+    max_tokens: 1024
+    temperature: 0.0
+
+  # Embedding configuration
+  embedding_model: "${EMBEDDING_MODEL:text-embedding-3-small}"
+  embedding_provider: "${EMBEDDING_PROVIDER:auto}"  # auto, openai, voyage, local
+
+# Agent settings
+agent:
+  # Legacy model setting - use llm.agent_model instead
+  model: "${AGENT_MODEL:claude-sonnet-4-20250514}"
+  # model: "claude-opus-4-20250514"  # For more complex tasks
+
+  # Agent identity
+  name: "${AGENT_NAME:Assistant}"
+  description: "${AGENT_DESCRIPTION:a helpful AI assistant}"
+  objective: "${AGENT_OBJECTIVE:Help my owner with tasks, manage their digital presence, and handle communications on their behalf.}"
+
+  # Behavior settings
+  behavior:
+    # Spending controls
+    spending:
+      require_approval: true  # Require owner approval for purchases
+      auto_approve_limit: 0.0  # Auto-approve purchases under this amount (USD)
+
+    # External communication policy
+    external_policy:
+      respond_to_unknown: true  # Respond to emails from unknown senders
+      consult_owner_threshold: "medium"  # low, medium, high - when to consult owner
+      # low: consult for any non-trivial request
+      # medium: consult for requests involving money, data, or commitments
+      # high: only consult for major decisions
+
+    # Account creation behavior
+    accounts:
+      use_agent_email: true  # Always use agent's email for signups
+      check_existing_first: true  # Check for existing accounts before creating new ones
