@@ -48,9 +48,11 @@ def clean_env():
     """Temporarily clear LLM-related env vars to avoid side effects."""
     keys = [
         "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+        "MOONSHOT_API_KEY",
         "AGENTMAIL_API_KEY", "E2B_API_KEY",
         "SENDBLUE_API_KEY", "SENDBLUE_API_SECRET",
         "BABYAGI_CONFIG",
+        "AGENT_MODEL", "CODING_MODEL", "FAST_MODEL", "MEMORY_MODEL",
         "OWNER_ID", "OWNER_NAME", "OWNER_EMAIL", "OWNER_PHONE", "OWNER_TIMEZONE",
         "AGENT_NAME", "AGENT_DESCRIPTION", "AGENT_OBJECTIVE",
     ]

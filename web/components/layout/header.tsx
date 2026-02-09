@@ -30,94 +30,40 @@ export function Header() {
     };
   }, []);
 
+  const navLinks = [
+    { href: "/", label: "Chat" },
+    { href: "/tasks", label: "Tasks" },
+    { href: "/tools", label: "Tools" },
+    { href: "/memory", label: "Memory" },
+    { href: "/metrics", label: "Metrics" },
+    { href: "/channels", label: "Channels" },
+    { href: "/credentials", label: "Keys" },
+    { href: "/setup", label: "Setup" },
+  ];
+
   return (
-    <header className="flex items-center justify-between px-4 h-14 border-b bg-background shrink-0">
-      <div className="flex items-center gap-6">
-        <Link href="/" className="font-semibold text-lg">
-          BabyAGI
+    <header className="flex items-center justify-between px-4 h-14 border-b bg-background shrink-0 min-w-0">
+      <div className="flex items-center gap-4 min-w-0 flex-1">
+        <Link href="/" className="font-semibold text-lg shrink-0">
+          BabyAGI 3
         </Link>
-        <nav className="flex items-center gap-4 text-sm">
-          <Link
-            href="/"
-            className={
-              pathname === "/" ? "text-foreground" : "text-muted-foreground hover:text-foreground"
-            }
-          >
-            Chat
-          </Link>
-          <Link
-            href="/tasks"
-            className={
-              pathname === "/tasks"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }
-          >
-            Tasks
-          </Link>
-          <Link
-            href="/tools"
-            className={
-              pathname === "/tools"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }
-          >
-            Tools
-          </Link>
-          <Link
-            href="/memory"
-            className={
-              pathname === "/memory"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }
-          >
-            Memory
-          </Link>
-          <Link
-            href="/metrics"
-            className={
-              pathname === "/metrics"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }
-          >
-            Metrics
-          </Link>
-          <Link
-            href="/channels"
-            className={
-              pathname === "/channels"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }
-          >
-            Channels
-          </Link>
-          <Link
-            href="/credentials"
-            className={
-              pathname === "/credentials"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }
-          >
-            Keys
-          </Link>
-          <Link
-            href="/setup"
-            className={
-              pathname === "/setup"
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }
-          >
-            Setup
-          </Link>
+        <nav className="flex items-center gap-3 text-sm overflow-x-auto scrollbar-none min-w-0">
+          {navLinks.map(({ href, label }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`shrink-0 ${
+                pathname === href
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </Link>
+          ))}
         </nav>
       </div>
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-2 text-sm shrink-0 ml-2">
         <span
           className={`inline-block w-2 h-2 rounded-full ${
             connected === null
@@ -127,7 +73,7 @@ export function Header() {
                 : "bg-red-500"
           }`}
         />
-        <span className="text-muted-foreground">
+        <span className="text-muted-foreground hidden sm:inline">
           {connected === null
             ? "Checking..."
             : connected

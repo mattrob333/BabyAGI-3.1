@@ -1,11 +1,16 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
 
+// All backend calls are routed through /api/* which Next.js rewrites to the
+// Python backend.  This avoids conflicts with Next.js page routes at paths
+// like /tools, /memory, /metrics that would otherwise intercept fetch calls.
+const API_PREFIX = "/api";
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const url = `${API_URL}${path}`;
+  const url = `${API_URL}${API_PREFIX}${path}`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options?.headers as Record<string, string>),
@@ -25,7 +30,7 @@ export async function apiFetch<T>(
 }
 
 export function apiStreamUrl(path: string): string {
-  return `${API_URL}${path}`;
+  return `${API_URL}${API_PREFIX}${path}`;
 }
 
 export function getAuthHeaders(): Record<string, string> {

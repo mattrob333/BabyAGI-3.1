@@ -185,3 +185,12 @@
 .prose blockquote {
   @apply border-l-2 border-primary/50 pl-3 italic opacity-80;
 }
+
+/* Hide scrollbar while keeping scroll functionality */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

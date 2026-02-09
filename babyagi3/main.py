@@ -302,12 +302,14 @@ async def run_all_channels():
             )
             tasks.append(extraction_loop())
 
-    # CLI (always enabled, but check config)
-    if is_channel_enabled(config, "cli"):
+    # CLI (skip when stdin is not a TTY, e.g. Docker with /dev/null)
+    if is_channel_enabled(config, "cli") and sys.stdin.isatty():
         from listeners.cli import run_cli_listener
         cli_config = get_channel_config(config, "cli")
         tasks.append(run_cli_listener(agent, cli_config))
         logger.info("CLI listener enabled")
+    elif is_channel_enabled(config, "cli"):
+        logger.info("CLI listener skipped (stdin is not a TTY)")
 
     # Email
     if is_channel_enabled(config, "email"):
@@ -432,12 +434,14 @@ async def run_all_with_server(port: int = 5000):
             )
             tasks.append(extraction_loop())
 
-    # CLI listener
-    if is_channel_enabled(config, "cli"):
+    # CLI listener (skip when stdin is not a TTY, e.g. Docker with /dev/null)
+    if is_channel_enabled(config, "cli") and sys.stdin.isatty():
         from listeners.cli import run_cli_listener
         cli_config = get_channel_config(config, "cli")
         tasks.append(run_cli_listener(agent, cli_config))
         logger.info("CLI listener enabled")
+    elif is_channel_enabled(config, "cli"):
+        logger.info("CLI listener skipped (stdin is not a TTY)")
 
     # Email listener
     if is_channel_enabled(config, "email"):

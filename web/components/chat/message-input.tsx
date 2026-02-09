@@ -52,7 +52,7 @@ export function MessageInput({
     const formData = new FormData();
     formData.append("file", file);
     try {
-      const res = await fetch(`/files/upload`, {
+      const res = await fetch(`/api/files/upload`, {
         method: "POST",
         body: formData,
       });
